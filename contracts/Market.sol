@@ -1,109 +1,307 @@
-// SPDX-License-Identifier: UNLICENSED
-pragma solidity >=0.8.9;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.7;
 
-// Allow user to list NFT contract for sale
-// NFT follows ERC721 or ERC1155 standard
-// Auction are supported, but not required
-// User can buy NFT with ERC20 token or ETH
-contract Marketplace {
-    // NFT contract address
-    address public nftAddress;
+import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
-    // NFT ID
-    uint256 public nftId;
+error PriceNotMet(address nftAddress, uint256 tokenId, uint256 price);
+error ItemNotForSale(address nftAddress, uint256 tokenId);
+error NotListed(address nftAddress, uint256 tokenId);
+error AlreadyListed(address nftAddress, uint256 tokenId);
+error NoProceeds();
+error NotOwner();
+error NotApprovedForMarketplace();
+error PriceMustBeAboveZero();
+error UserAlreadyNotBanned(address user);
+error UserBanned(address user);
 
-    // Price of NFT
-    uint256 public price;
+error InvalidQuantity(uint256 quantity);
+error InvalidPrice(uint256 price);
 
-    // Owner of NFT
-    address public owner;
+address constant ETH = address(0);
 
-    // Buyer of NFT
-    address public buyer;
+contract Marketplace is Ownable, ReentrancyGuard {
+    constructor(address _owner) Ownable(_owner) {}
 
-    // ERC20 token address
-    address public tokenAddress;
-
-    // Auction start time
-    uint256 public auctionStartTime;
-
-    // Auction end time
-    uint256 public auctionEndTime;
-
-    // Auction minimum price
-    uint256 public auctionMinPrice;
-
-    // Auction highest bid
-    uint256 public auctionHighestBid;
-
-    // Auction highest bidder
-    address public auctionHighestBidder;
-
-    // Auction ended
-    bool public auctionEnded;
-
-    // Event emitted when NFT is listed for sale
-    event NFTListed(uint256 nftId, uint256 price, address owner);
-
-    // Event emitted when NFT is bought
-    event NFTBought(uint256 nftId, uint256 price, address owner, address buyer);
-
-    // Event emitted when NFT is listed for auction
-    event NFTAuctionListed(uint256 nftId, uint256 startTime, uint256 endTime, uint256 minPrice, address owner);
-
-    // Event emitted when NFT is bid
-    event NFTBid(uint256 nftId, uint256 price, address bidder);
-
-    // Event emitted when NFT auction is ended
-    event NFTAuctionEnded(uint256 nftId, uint256 price, address owner, address buyer);
-
-    // Event emitted when NFT is withdrawn
-    event NFTWithdrawn(uint256 nftId, address owner);
-
-    // Event emitted when ERC20 token is withdrawn
-    event TokenWithdrawn(uint256 amount, address owner);
-
-    // Event emitted when ERC20 token is deposited
-    event TokenDeposited(uint256 amount, address owner);
-
-    // Event emitted when ERC20 token is transferred
-    event TokenTransferred(uint256 amount, address from, address to);
-
-    // Event emitted when ERC20 token is approved
-    event TokenApproved(uint256 amount, address owner, address spender);
-
-    // Event emitted when ERC20 token is spent
-    event TokenSpent(uint256 amount, address owner, address spender);
-
-    // Event emitted when ERC20 token is burned
-    event TokenBurned(uint256 amount, address owner);
-
-    function listItem(uint256 _nftId, uint256 _price) public {
-        nftId = _nftId;
-        price = _price;
-        owner = msg.sender;
-
-        emit NFTListed(nftId, price, owner);
+    struct Listing {
+        uint256 price;
+        address paymentToken;
+        address seller;
     }
 
-    function cancelListing() public {}
-
-    function buyItem(uint256 _nftId) public {
-        nftId = _nftId;
-        buyer = msg.sender;
-
-        emit NFTBought(nftId, price, owner, buyer);
+    struct Auction {
+        address seller;
+        address priceToken;
+        uint256 floorPrice;
+        uint256 endAuction;
+        uint256 bidCount;
+        uint256 currentBidPrice;
+        address payable currentBidOwner;
     }
 
-    function listAuction(uint256 _nftId, uint256 _startTime, uint256 _endTime, uint256 _minPrice) public {
-        nftId = _nftId;
-        auctionStartTime = _startTime;
-        auctionEndTime = _endTime;
-        auctionMinPrice = _minPrice;
-        owner = msg.sender;
+    // NFTCollection => TokenID => Listing/Auction
+    mapping(address => mapping(uint256 => Listing)) private derectSale;
+    mapping(address => mapping(uint256 => Auction)) private auctions;
 
-        emit NFTAuctionListed(nftId, auctionStartTime, auctionEndTime, auctionMinPrice, owner);
+    // Seller => token => amount
+    mapping(address => mapping(address => uint256)) private sellerProceeds;
+
+    // =============================== //
+
+    mapping(address => bool) blackList;
+
+    function banUser(address _user) external onlyOwner {
+        blackList[_user] = true;
     }
 
-    function withdrawProceeds() public {}
+    function unbanUser(address _user) external onlyOwner {
+        require(blackList[_user] == true, UserAlreadyNotBanned(_user));
+        delete blackList[_user];
+    }
+
+    modifier whiteListOnly() {
+        require(blackList[msg.sender] != true, UserBanned(msg.sender));
+        _;
+    }
+
+    // ====================== //
+
+    event NewAuctionListed();
+    event NewBidPlaced();
+
+    event ItemListed(address indexed seller, address indexed nftAddress, uint256 indexed tokenId, uint256 price);
+
+    event ItemCanceled(address indexed seller, address indexed nftAddress, uint256 indexed tokenId);
+
+    event ItemBought(address indexed buyer, address indexed nftAddress, uint256 indexed tokenId, uint256 price);
+
+    // ================ Function modifiers ================== //
+    modifier notListed(address _nftAddress, uint256 _tokenId) {
+        Listing memory listing = directListings[nftAddress][tokenId];
+        Auction memory aution = auctions[nftAddress][tokenId];
+
+        if (listing.price > 0 && auction.floorPrice > 0) {
+            revert AlreadyListed(nftAddress, tokenId);
+        }
+        _;
+    }
+
+    modifier nftOwnerOnly(
+        address spender,
+        address nftAddress,
+        uint256 tokenId,
+        NFTType nftType
+    ) {
+        IERC721 nft = IERC721(nftAddress);
+        address owner = nft.ownerOf(tokenId);
+        if (spender != owner) {
+            revert NotOwner();
+        }
+        _;
+    }
+
+    modifier isListed(address nftAddress, uint256 tokenId) {
+        Listing memory listing = directListings[nftAddress][tokenId];
+        if (listing.price <= 0) {
+            revert NotListed(nftAddress, tokenId);
+        }
+        _;
+    }
+
+    function createAuction(
+        address nftAddress,
+        uint256 tokenId,
+        uint256 floorPrice,
+        address priceToken,
+        uint256 endAuction
+    ) external {
+        IERC721(nftAddress).approve(address(this), tokenId);
+
+        auctions[auctionId] = Auction(
+            msg.sender,
+            nftAddress,
+            tokenId,
+            floorPrice,
+            priceToken,
+            0,
+            payable(address(0)),
+            endAuction,
+            0
+        );
+        auctionId++;
+
+        emit NewAuctionListed();
+    }
+
+    function placeNewBid(uint256 _auctionId, uint256 _newBid) external payable {
+        Auction storage auction = auctions[_auctionId];
+
+        // Need to send token/coin to market contract
+        if (auction.priceToken == address(0)) {
+            // TODO: need change
+            require(msg.value >= auction.currentBidPrice);
+            return;
+        }
+
+        IERC20 paymentToken = IERC20(auction.priceToken);
+
+        //
+        paymentToken.transferFrom(msg.sender, address(this), _newBid);
+
+        if (auction.bidCount > 0) {
+            paymentToken.transfer(auction.currentBidOwner, auction.currentBidPrice);
+        }
+
+        auction.currentBidPrice = _newBid;
+        auction.currentBidOwner = payable(msg.sender);
+        auction.bidCount++;
+
+        emit NewBidPlaced();
+    }
+
+    function withdrawNft(uint256 _auctionId) external {
+        // Require exist auction
+        // Require auction end
+        // Require: winner
+
+        Auction memory auction = auctions[_auctionId];
+
+        address nftAddress = auction.nft;
+        delete (auctions[_auctionId]);
+        IERC721(nftAddress).safeTransferFrom(auction.seller, msg.sender, auction.tokenId);
+    }
+
+    function withdrawProceeds(address[] memory tokens) external {
+        for (uint256 i = 0; i < tokens.length; i++) {
+            address withdrawalToken = tokens[i];
+            uint256 proceeds = sellerProceeds[msg.sender][withdrawalToken];
+
+            if (proceeds > 0) {
+                uint256 tempProceeds = proceeds;
+                sellerProceeds[msg.sender][withdrawalToken] = 0;
+
+                // ETH
+                if (withdrawalToken == address(0)) {
+                    (bool success, ) = payable(msg.sender).call{ value: tempProceeds }("");
+                    require(success, "Transfer failed");
+                    break;
+                }
+
+                IERC20 _withdrawalToken = IERC20(withdrawalToken);
+                require(_withdrawalToken.transfer(msg.sender, proceeds), "Transfer failed");
+            }
+        }
+    }
+
+    function isOpen(uint256 _auctionId) public view returns (bool) {
+        Auction storage auction = auctions[_auctionId];
+        if (block.timestamp >= auction.endAuction) return false;
+        return true;
+    }
+
+    function getCurrentBid(uint256 _auctionId) public view returns (address, uint256) {
+        require(auctions[_auctionId].seller != address(0), "Invalid auction index");
+        return (auctions[_auctionId].currentBidOwner, auctions[_auctionId].currentBidPrice);
+    }
+
+    // ======= Direct list for sale ======== //
+
+    function listItemForDirectSale(
+        bool _isERC1155,
+        address _paymentToken,
+        address _nftAddress,
+        uint256 _tokenId,
+        uint256 _erc1155Quantity,
+        uint256 _price
+    ) external whiteListOnly nftOwnerOnly(_nftAddress, _tokenId, msg.sender) notListed {
+        require(_price > 0, PriceMustBeAboveZero());
+
+        Listing memory listing = directListings[_nftAddress][_tokenId];
+        if (listing.price > 0) {
+            revert AlreadyListed(_nftAddress, _tokenId);
+        }
+
+        if (_isERC1155) {
+            listErc1155ForDirectSale(_nftAddress, _paymentToken, _tokenId, _erc1155Quantity, _price);
+        } else {
+            listErc721ForDirectSale(_nftAddress, _paymentToken, _tokenId, _price);
+        }
+
+        directListings[_nftAddress][_tokenId] = Listing(_price, _paymentToken, msg.sender);
+        emit ItemListed(msg.sender, _nftAddress, _tokenId, _price);
+    }
+
+    function listErc1155ForDirectSale(
+        address _nftAddress,
+        address _paymentToken,
+        uint256 _tokenId,
+        uint256 _quantity,
+        uint256 _price
+    ) private {
+        require(_quantity > 0, InvalidQuantity(_quantity));
+        require(_price > 0, InvalidPrice(_quantity));
+        require(_quantity > 0, InvalidQuantity(_quantity));
+    }
+
+    function listErc721ForDirectSale(
+        address _nftAddress,
+        address _paymentToken,
+        uint256 _tokenId,
+        uint256 _price
+    ) private {}
+
+    function cancelListing(
+        address nftAddress,
+        uint256 tokenId
+    ) external isOwner(nftAddress, tokenId, msg.sender) isListed(nftAddress, tokenId) {
+        delete (directListings[nftAddress][tokenId]);
+        emit ItemCanceled(msg.sender, nftAddress, tokenId);
+    }
+
+    function buyItem(address nftAddress, uint256 tokenId) external payable isListed(nftAddress, tokenId) nonReentrant {
+        Listing memory listedItem = directListings[nftAddress][tokenId];
+        if (msg.value < listedItem.price) {
+            revert PriceNotMet(nftAddress, tokenId, listedItem.price);
+        }
+
+        sellerProceeds[listedItem.seller][listedItem.paymentToken] += msg.value;
+        delete (directListings[nftAddress][tokenId]);
+        IERC721(nftAddress).safeTransferFrom(listedItem.seller, msg.sender, tokenId);
+        emit ItemBought(msg.sender, nftAddress, tokenId, listedItem.price);
+    }
+
+    function updateListing(
+        address nftAddress,
+        uint256 tokenId,
+        uint256 newPrice
+    ) external isListed(nftAddress, tokenId) nonReentrant isOwner(nftAddress, tokenId, msg.sender) {
+        if (newPrice == 0) {
+            revert PriceMustBeAboveZero();
+        }
+
+        directListings[nftAddress][tokenId].price = newPrice;
+        emit ItemListed(msg.sender, nftAddress, tokenId, newPrice);
+    }
+
+    // function withdrawProceeds() external {
+    //     uint256 proceeds = sellerProceeds[msg.sender];
+    //     if (proceeds <= 0) {
+    //         revert NoProceeds();
+    //     }
+    //     sellerProceeds[msg.sender] = 0;
+
+    //     (bool success, ) = payable(msg.sender).call{value: proceeds}("");
+    //     require(success, "Transfer failed");
+    // }
+
+    function getListing(address nftAddress, uint256 tokenId) external view returns (Listing memory) {
+        return directListings[nftAddress][tokenId];
+    }
+
+    function getProceeds(address seller, address token) external view returns (uint256) {
+        return sellerProceeds[seller][token];
+    }
 }
