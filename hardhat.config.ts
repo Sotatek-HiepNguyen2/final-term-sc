@@ -1,11 +1,9 @@
 import "@nomicfoundation/hardhat-toolbox";
+import "@openzeppelin/hardhat-upgrades";
 import { config as dotEnvConfig } from "dotenv";
 import "hardhat-deploy";
 import type { HardhatUserConfig } from "hardhat/config";
 import type { NetworkUserConfig } from "hardhat/types";
-
-import "./tasks/accounts";
-import "./tasks/lock";
 
 dotEnvConfig();
 
@@ -24,7 +22,6 @@ function getChainConfig(chain: keyof typeof chainIds): NetworkUserConfig {
     accounts: {
       count: 10,
       mnemonic,
-      path: "m/44'/60'/0'/0",
     },
     chainId: chainIds[chain],
     url: jsonRpcUrl,
@@ -57,7 +54,7 @@ const config: HardhatUserConfig = {
     tests: "./test",
   },
   solidity: {
-    version: "0.8.19",
+    version: "0.8.20",
     settings: {
       metadata: {
         // Not including the metadata hash
