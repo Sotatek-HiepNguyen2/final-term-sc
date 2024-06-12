@@ -73,7 +73,7 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         uint256 tokenId;
         bool isSold;
     }
-    mapping(uint256 => Listing) directSales;
+    mapping(uint256 => Listing) public directSales;
     uint256 listingId;
 
     struct Auction {
@@ -89,7 +89,7 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         address payable currentBidOwner;
         bool isEnded;
     }
-    mapping(uint256 => Auction) auctions;
+    mapping(uint256 => Auction) public auctions;
     uint256 auctionId;
 
     // Seller => token => amount
@@ -138,20 +138,6 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     event ItemListed(address seller, address nftAddress, uint256 tokenId, uint256 price);
     event ItemCanceled(address seller, address nftAddress, uint256 tokenId, uint256 quantity);
     event ItemBought(address buyer, address nftAddress, uint256 tokenId, uint256 price, uint256 quantity);
-
-    // ================ Function modifiers ================== //
-    modifier nftOwnerOnly(
-        address spender,
-        address nftAddress,
-        uint256 tokenId
-    ) {
-        IERC721 nft = IERC721(nftAddress);
-        address owner = nft.ownerOf(tokenId);
-        if (spender != owner) {
-            revert NotOwner();
-        }
-        _;
-    }
 
     //=============Auction==================//
 
@@ -267,11 +253,11 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     function validateErc1155(address _nftAddress, uint256 _tokenId, uint256 _quantity) private view {
         IERC1155 nft = IERC1155(_nftAddress);
-        if (nft.balanceOf(_msgSender(), _tokenId) >= _quantity) {
+        if (nft.balanceOf(_msgSender(), _tokenId) < _quantity) {
             revert InsufficientBalance(_quantity);
         }
 
-        if (nft.isApprovedForAll(_msgSender(), address(this))) {
+        if (!nft.isApprovedForAll(_msgSender(), address(this))) {
             revert NftHasNotApproved();
         }
     }
@@ -288,7 +274,7 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     modifier validPrice(uint256 _price) {
-        if (_price <= 0) revert InvalidPrice(_price);
+        if (_price == 0) revert InvalidPrice(_price);
         _;
     }
 
@@ -311,11 +297,7 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         uint256 _tokenId,
         uint256 _erc1155Quantity,
         uint256 _price
-    ) external whiteListOnly validNFT(_nftAddress, _tokenId, _erc1155Quantity) {
-        if (_price == 0) {
-            revert PriceMustBeAboveZero();
-        }
-
+    ) external whiteListOnly validPrice(_price) validNFT(_nftAddress, _tokenId, _erc1155Quantity) {
         Listing memory newListing = Listing({
             price: _price,
             erc1155Quantity: _erc1155Quantity,
@@ -335,9 +317,9 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     function cancelListing(uint256 _saleId) external {
         Listing memory sale = directSales[_saleId];
 
-        require(sale.price > 0, "");
-        require(sale.seller == msg.sender, "Cancel: should be the owner of the sell.");
-        require(sale.isSold != true, "Cancel: already sold.");
+        require(sale.price > 0, "Invalid sale id");
+        require(sale.seller == msg.sender, "Cancel: should be the owner of the sell");
+        require(sale.isSold == false, "Cancel: already sold");
 
         delete (directSales[_saleId]);
         emit ItemCanceled(sale.seller, sale.nftAddress, sale.tokenId, sale.erc1155Quantity);
@@ -374,7 +356,7 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             );
         }
 
-        delete (directSales[_saleId]);
+        directSales[_saleId].isSold = true;
         emit ItemBought(msg.sender, sale.nftAddress, sale.tokenId, sale.price, sale.erc1155Quantity);
     }
 
