@@ -81,6 +81,7 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         address nftAddress;
         address priceToken;
         uint256 tokenId;
+        uint256 erc1155Quantity;
         uint256 floorPrice;
         uint256 endAuction;
         uint256 bidIncrement;
@@ -128,8 +129,7 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         address creator,
         address nftAddress,
         uint256 tokenId,
-        NFTType nftType,
-        uint256 quantity,
+        uint256 erc1155Quantity,
         uint256 floorPrice,
         uint256 endTime
     );
@@ -141,99 +141,155 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     //=============Auction==================//
 
-    //    function createAuction(
-    //        address _nftAddress,
-    //        uint256 _tokenId,
-    //        uint256 floorPrice,
-    //        address priceToken,
-    //        uint256 endAuction
-    //    ) external whiteListOnly {
-    //         if (isERC721(_nftAddress)) {
-    //             IERC721(_nftAddress).approve(address(this), _tokenId);
-    //         } else if (isERC1155(_nftAddress)) {
+    function createAuction(
+        address _priceToken,
+        address _nftAddress,
+        uint256 _tokenId,
+        uint256 _floorPrice,
+        uint256 _endAuction,
+        uint256 _erc1155Quantity,
+        uint256 _bidIncrement
+    ) external whiteListOnly validPrice(_floorPrice) validNFT(_nftAddress, _tokenId, _erc1155Quantity) {
+        auctions[auctionId] = Auction(
+            _msgSender(),
+            _nftAddress,
+            _priceToken,
+            _tokenId,
+            _erc1155Quantity,
+            _floorPrice,
+            _endAuction,
+            _bidIncrement,
+            0,
+            0,
+            payable(address(0)),
+            false
+        );
+        auctionId++;
 
-    //         }
+        emit NewAuctionCreated(_msgSender(), _nftAddress, _tokenId, _erc1155Quantity, _floorPrice, _endAuction);
+    }
 
-    //        auctions[auctionId] = Auction(
-    //            msg.sender,
-    //            _nftAddress,
-    //            _tokenId,
-    //            floorPrice,
-    //            priceToken,
-    //            0,
-    //            payable(address(0)),
-    //            endAuction,
-    //            0
-    //        );
-    //        auctionId++;
+    function cancelAuction(uint256 _auctionId) external {
+        Auction memory auction = auctions[_auctionId];
 
-    //        emit NewAuctionCreated(msg.sender, _nftAddress, _tokenId, );
-    //    }
+        // Require exist auction
+        require(auction.floorPrice > 0, "Auction not exist");
+        // Require no bid yet
+        require(auction.bidCount == 0, "User already bidded");
+        // Require auction in progress
+        require(auction.endAuction < block.timestamp && !auction.isEnded, "Auction was ended");
 
-    //    function cancelAuction(
-    //        address _nftAddress,
-    //        uint256 _tokenId
-    //    ) external nftOwnerOnly(_nftAddress, _tokenId, msg.sender) {
-    //        delete (directListings[_nftAddress][_tokenId]);
-    //        emit ItemCanceled(msg.sender, _nftAddress, _tokenId);
-    //    }
+        delete (auctions[_auctionId]);
+        emit ItemCanceled(_msgSender(), auction.nftAddress, auction.tokenId, auction.erc1155Quantity);
+    }
 
-    function placeNewBid(uint256 _auctionId, uint256 _newBid) external payable {
+    //TODO: event params
+    event AuctionEnded();
+
+    function endAuction(uint256 _auctionId) external {
+        Auction memory auction = auctions[_auctionId];
+
+        // Require exist auction
+        require(auction.floorPrice > 0, "Auction not exist");
+        // Require creator only
+        require(auction.seller == _msgSender(), "Not creator");
+        // Require end time has passed
+        require(block.timestamp >= auction.endAuction && !auction.isEnded, "Not end yet");
+
+        auctions[_auctionId].isEnded = true;
+        emit AuctionEnded();
+    }
+
+    function placeNewBid(uint256 _auctionId, uint256 _newBidPrice) external payable whiteListOnly {
         Auction storage auction = auctions[_auctionId];
+
+        // Require exist auction
+        require(auction.floorPrice > 0, "Auction not exist");
+        // Require auction in progress
+        require(auction.endAuction > block.timestamp && !auction.isEnded, "Auction was ended");
 
         // Need to send token/coin to market contract
         if (auction.priceToken == address(0)) {
-            // TODO: need change
-            require(msg.value >= auction.currentBidPrice);
-            return;
+            // TODO: safe math
+            require(msg.value >= auction.floorPrice, "Bid price must be above floor price");
+
+            if (auction.bidCount > 0) {
+                require(
+                    msg.value >= auction.currentBidPrice + auction.bidIncrement,
+                    "New bid price need to greater than minimum price"
+                );
+            }
+
+            sellerProceeds[_msgSender()][address(0)] += msg.value;
+            auction.currentBidPrice = msg.value;
+        } else {
+            // require token amount also
+            require(_newBidPrice >= auction.floorPrice, "Bid price must be above floor price");
+
+            if (auction.bidCount > 0) {
+                require(
+                    _newBidPrice >= auction.currentBidPrice + auction.bidIncrement,
+                    "New bid price need to greater than minimum price"
+                );
+            }
+
+            IERC20 paymentToken = IERC20(auction.priceToken);
+            paymentToken.transferFrom(_msgSender(), address(this), _newBidPrice);
+            sellerProceeds[_msgSender()][auction.priceToken] += _newBidPrice;
+            auction.currentBidPrice = _newBidPrice;
         }
 
-        IERC20 paymentToken = IERC20(auction.priceToken);
-
-        //
-        paymentToken.transferFrom(msg.sender, address(this), _newBid);
-
-        if (auction.bidCount > 0) {
-            paymentToken.transfer(auction.currentBidOwner, auction.currentBidPrice);
-        }
-
-        auction.currentBidPrice = _newBid;
-        auction.currentBidOwner = payable(msg.sender);
+        auction.currentBidOwner = payable(_msgSender());
         auction.bidCount++;
 
+        //TODO: event params
         emit NewBidPlaced();
     }
 
-    //    function withdrawNft(uint256 _auctionId) external {
-    //        // Require exist auction
-    //        // Require auction end
-    //        // Require: winner
+    function withdrawNft(uint256 _auctionId) external {
+        Auction memory auction = auctions[_auctionId];
+        // Require exist auction
+        require(auction.floorPrice > 0, "Auction not exist");
+        // Require auction end
+        require(auction.endAuction >= block.timestamp && auction.isEnded, "Auction in progress");
+        // Require: winner
+        require(auction.currentBidOwner == _msgSender(), "Not the auction winner");
 
-    //        Auction memory auction = auctions[_auctionId];
+        address nftAddress = auction.nftAddress;
+        delete (auctions[_auctionId]);
 
-    //        address nftAddress = auction.nft;
-    //        delete (auctions[_auctionId]);
-    //        IERC721(nftAddress).safeTransferFrom(auction.seller, msg.sender, auction.tokenId);
-    //    }
+        if (isERC721(nftAddress)) {
+            return IERC721(nftAddress).safeTransferFrom(auction.seller, _msgSender(), auction.tokenId);
+        }
+
+        return
+            IERC1155(nftAddress).safeTransferFrom(
+                auction.seller,
+                _msgSender(),
+                auction.tokenId,
+                auction.erc1155Quantity,
+                "0x0"
+            );
+    }
 
     function withdrawProceeds(address[] memory tokens) external {
         for (uint256 i = 0; i < tokens.length; i++) {
             address withdrawalToken = tokens[i];
-            uint256 proceeds = sellerProceeds[msg.sender][withdrawalToken];
+            uint256 proceeds = sellerProceeds[_msgSender()][withdrawalToken];
 
             if (proceeds > 0) {
                 uint256 tempProceeds = proceeds;
-                sellerProceeds[msg.sender][withdrawalToken] = 0;
+                sellerProceeds[_msgSender()][withdrawalToken] = 0;
 
                 // ETH
                 if (withdrawalToken == address(0)) {
-                    (bool success, ) = payable(msg.sender).call{ value: tempProceeds }("");
+                    (bool success, ) = payable(_msgSender()).call{ value: tempProceeds }("");
                     require(success, "Transfer failed");
                     break;
                 }
 
                 IERC20 _withdrawalToken = IERC20(withdrawalToken);
-                require(_withdrawalToken.transfer(msg.sender, proceeds), "Transfer failed");
+                require(_withdrawalToken.transfer(_msgSender(), proceeds), "Transfer failed");
             }
         }
     }
@@ -329,6 +385,7 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         Listing memory sale = directSales[_saleId];
 
         require(sale.price > 0, "Not exist");
+        require(sale.isSold == false, "Already sold");
         bool isETHPayment = sale.paymentToken == address(0);
 
         if (isETHPayment) {

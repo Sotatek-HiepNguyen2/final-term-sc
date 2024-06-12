@@ -5,6 +5,7 @@ import { ERC20Mock, ERC721Mock, ERC1155Mock, Marketplace } from "../types";
 
 export const TOTAL_SUPPLY_ERC20 = BigInt(10e18);
 export const ERC721_TOKEN_ID = 1;
+export const ERC721_AUCTION_TOKEN_ID = 2;
 export const ERC721_TOKEN_URI = "https://mytoken.com/1";
 export const ERC1155_TOKEN_ID = 5;
 export const ERC1155_QUANTITY = 100;
@@ -27,6 +28,7 @@ export async function deployMarketFixture() {
   await erc20Token.transfer(buyer, TOTAL_SUPPLY_ERC20 / BigInt(2));
   await erc20Token.transfer(bidder, TOTAL_SUPPLY_ERC20 / BigInt(2));
   await erc721Token.safeMint(seller, ERC721_TOKEN_ID, ERC721_TOKEN_URI);
+  await erc721Token.safeMint(autionCreator, ERC721_AUCTION_TOKEN_ID, ERC721_TOKEN_URI);
   await erc1155Token.mint(seller, ERC1155_TOKEN_ID, ERC1155_QUANTITY, "0x");
   await erc1155Token.mint(autionCreator, ERC1155_TOKEN_ID, ERC1155_QUANTITY, "0x");
 

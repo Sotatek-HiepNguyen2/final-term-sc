@@ -4,6 +4,7 @@ import { ethers } from "hardhat";
 import { describe } from "mocha";
 
 import {
+  ERC721_AUCTION_TOKEN_ID,
   ERC721_TOKEN_ID,
   ERC721_TOKEN_URI,
   ERC1155_QUANTITY,
@@ -249,7 +250,90 @@ describe("Market", function () {
           expect(item.price).to.equal(BigInt(1e18));
           expect(item.isSold).to.be.false;
         });
+
+        it("Should revert if sale not exist", async function () {
+          await expect(this.market.connect(this.buyer).buyItem(0)).to.be.revertedWith("Not exist");
+        });
+
+        it("Should revert if the item is already sold", async function () {
+          await this.erc721Token.connect(this.seller).approve(await this.market.getAddress(), ERC721_TOKEN_ID);
+          await this.market
+            .connect(this.seller)
+            .listForSale(ethers.ZeroAddress, await this.erc721Token.getAddress(), ERC721_TOKEN_ID, 0, BigInt(1e18));
+          await this.market.connect(this.buyer).buyItem(0, { value: BigInt(1e18) });
+
+          await expect(this.market.connect(this.buyer).buyItem(0)).to.be.revertedWith("Already sold");
+        });
+
+        it("Should revert if the ETH is not enough", async function () {
+          await this.erc721Token.connect(this.seller).approve(await this.market.getAddress(), ERC721_TOKEN_ID);
+          await this.market
+            .connect(this.seller)
+            .listForSale(ethers.ZeroAddress, await this.erc721Token.getAddress(), ERC721_TOKEN_ID, 0, BigInt(1e18));
+
+          await expect(this.market.connect(this.buyer).buyItem(0)).to.be.revertedWithCustomError(
+            this.market,
+            "PriceNotMet",
+          );
+        });
+
+        it("Should buy an erc721 token with ETH", async function () {
+          await this.erc721Token.connect(this.seller).approve(await this.market.getAddress(), ERC721_TOKEN_ID);
+          await this.market
+            .connect(this.seller)
+            .listForSale(ethers.ZeroAddress, await this.erc721Token.getAddress(), ERC721_TOKEN_ID, 0, BigInt(1e18));
+
+          await this.market.connect(this.buyer).buyItem(0, { value: BigInt(1e18) });
+
+          const item = await this.market.directSales(0);
+          expect(item.isSold).to.be.true;
+        });
+
+        it("Should buy an erc1155 token with ETH", async function () {
+          await this.erc1155Token.connect(this.seller).setApprovalForAll(await this.market.getAddress(), true);
+          await this.market
+            .connect(this.seller)
+            .listForSale(
+              ethers.ZeroAddress,
+              await this.erc1155Token.getAddress(),
+              ERC1155_TOKEN_ID,
+              ERC1155_QUANTITY,
+              BigInt(1e18),
+            );
+
+          await this.market.connect(this.buyer).buyItem(0, { value: BigInt(1e18) });
+
+          const item = await this.market.directSales(0);
+          expect(item.isSold).to.be.true;
+        });
+
+        it("Should buy an erc721 token with ERC20", async function () {
+          await this.erc721Token.connect(this.seller).approve(await this.market.getAddress(), ERC721_TOKEN_ID);
+          await this.market
+            .connect(this.seller)
+            .listForSale(this.erc20Token, await this.erc721Token.getAddress(), ERC721_TOKEN_ID, 0, BigInt(1e18));
+
+          await this.erc20Token.connect(this.buyer).approve(await this.market.getAddress(), BigInt(1e18));
+          await this.market.connect(this.buyer).buyItem(0);
+
+          const item = await this.market.directSales(0);
+          expect(item.isSold).to.be.true;
+        });
+
+        it("Seller should receive the right amount of ETH", async function () {
+          await this.erc721Token.connect(this.seller).approve(await this.market.getAddress(), ERC721_TOKEN_ID);
+          await this.market
+            .connect(this.seller)
+            .listForSale(ethers.ZeroAddress, await this.erc721Token.getAddress(), ERC721_TOKEN_ID, 0, BigInt(1e18));
+
+          const sellerBalanceBefore = await this.market.getProceeds(await this.seller.getAddress(), ethers.ZeroAddress);
+          await this.market.connect(this.buyer).buyItem(0, { value: BigInt(1e18) });
+          const sellerBalanceAfter = await this.market.getProceeds(await this.seller.getAddress(), ethers.ZeroAddress);
+
+          expect(sellerBalanceAfter - sellerBalanceBefore).to.equal(BigInt(1e18));
+        });
       });
+
       describe("Cancel listing", function () {
         beforeEach(async function () {
           await this.erc721Token.connect(this.seller).approve(await this.market.getAddress(), ERC721_TOKEN_ID);
@@ -281,7 +365,353 @@ describe("Market", function () {
             .withArgs(this.seller.address, this.erc721Token.getAddress(), ERC721_TOKEN_ID, 0);
         });
       });
-      describe("Auction", function () {});
+
+      describe("Auction", function () {
+        it("Should revert if blacklisted", async function () {
+          await expect(
+            this.market
+              .connect(this.bannedUser)
+              .createAuction(
+                ethers.ZeroAddress,
+                await this.erc721Token.getAddress(),
+                ERC721_TOKEN_ID,
+                BigInt(2e18),
+                Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+                BigInt(1e18),
+                BigInt(1e18),
+              ),
+          ).to.be.revertedWithCustomError(this.market, "UserBanned");
+
+          await expect(
+            this.market.connect(this.bannedUser).placeNewBid(0, 0, { value: BigInt(1e18) }),
+          ).to.be.revertedWithCustomError(this.market, "UserBanned");
+        });
+
+        it("Should revert if the erc721 is not approved", async function () {
+          await expect(
+            this.market
+              .connect(this.auctionCreator)
+              .createAuction(
+                ethers.ZeroAddress,
+                await this.erc721Token.getAddress(),
+                ERC721_TOKEN_ID,
+                BigInt(2e18),
+                Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+                BigInt(1e18),
+                BigInt(1e18),
+              ),
+          ).to.be.revertedWith("NFTTrade: Caller has not approved NFTTrade contract for token transfer.");
+        });
+
+        it("Should revert if the token is not erc721 or erc1155", async function () {
+          await expect(
+            this.market
+              .connect(this.auctionCreator)
+              .createAuction(
+                ethers.ZeroAddress,
+                await this.erc20Token.getAddress(),
+                ERC721_TOKEN_ID,
+                BigInt(2e18),
+                Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+                BigInt(1e18),
+                BigInt(1e18),
+              ),
+          ).to.be.reverted;
+        });
+
+        it("Should revert if the erc721 nft is not owned by the seller", async function () {
+          await expect(
+            this.market
+              .connect(this.auctionCreator)
+              .createAuction(
+                ethers.ZeroAddress,
+                await this.erc721Token.getAddress(),
+                ERC721_TOKEN_ID,
+                BigInt(2e18),
+                Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+                BigInt(1e18),
+                BigInt(1e18),
+              ),
+          ).to.be.revertedWith("NFTTrade: Caller has not approved NFTTrade contract for token transfer.");
+        });
+
+        it("Should create an auction for erc721 token", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          const auction = await this.market.auctions(0);
+          expect(auction.tokenId).to.equal(ERC721_AUCTION_TOKEN_ID);
+          expect(auction.nftAddress).to.equal(await this.erc721Token.getAddress());
+          expect(auction.priceToken).to.equal(ethers.ZeroAddress);
+          expect(auction.seller).to.equal(this.auctionCreator.address);
+          expect(auction.floorPrice).to.equal(BigInt(2e18));
+          // expect(auction.startTime).to.equal(Math.floor(new Date().getTime() / 1000));
+          // expect(auction.duration).to.equal(1 * 60 * 60);
+          expect(auction.bidCount).to.equal(0);
+          expect(auction.currentBidOwner).to.equal(ethers.ZeroAddress);
+          expect(auction.currentBidPrice).to.equal(0);
+          expect(auction.isEnded).to.be.false;
+        });
+
+        it("Should create an auction for erc1155 token", async function () {
+          await this.erc1155Token.connect(this.auctionCreator).setApprovalForAll(await this.market.getAddress(), true);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc1155Token.getAddress(),
+              ERC1155_TOKEN_ID,
+              BigInt(2e18),
+              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              ERC1155_QUANTITY,
+              BigInt(1e18),
+            );
+
+          const auction = await this.market.auctions(0);
+          expect(auction.tokenId).to.equal(ERC1155_TOKEN_ID);
+          expect(auction.nftAddress).to.equal(await this.erc1155Token.getAddress());
+          expect(auction.priceToken).to.equal(ethers.ZeroAddress);
+          expect(auction.seller).to.equal(this.auctionCreator.address);
+          expect(auction.floorPrice).to.equal(BigInt(2e18));
+          expect(auction.erc1155Quantity).to.equal(ERC1155_QUANTITY);
+          // expect(auction.startTime).to.equal(Math.floor(new Date().getTime() / 1000));
+          // expect(auction.duration).to.equal(1 * 60 * 60);
+          expect(auction.bidCount).to.equal(0);
+          expect(auction.currentBidOwner).to.equal(ethers.ZeroAddress);
+          expect(auction.currentBidPrice).to.equal(0);
+          expect(auction.isEnded).to.be.false;
+        });
+
+        it("Should emit event when create auction", async function () {
+          const endAuction = Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60;
+
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await expect(
+            this.market
+              .connect(this.auctionCreator)
+              .createAuction(
+                ethers.ZeroAddress,
+                await this.erc721Token.getAddress(),
+                ERC721_AUCTION_TOKEN_ID,
+                BigInt(2e18),
+                endAuction,
+                0,
+                BigInt(1e18),
+              ),
+          )
+            .to.emit(this.market, "NewAuctionCreated")
+            .withArgs(
+              this.auctionCreator.address,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              0,
+              BigInt(2e18),
+              endAuction,
+            );
+        });
+
+        it("Should revert if auction not exist", async function () {
+          await expect(this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(1e18) })).to.be.revertedWith(
+            "Auction not exist",
+          );
+        });
+
+        it("Should revert if the auction is already ended", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await ethers.provider.send("evm_increaseTime", [60 * 60]);
+          await ethers.provider.send("evm_mine");
+
+          await expect(this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(1e18) })).to.be.revertedWith(
+            "Auction was ended",
+          );
+        });
+
+        it("Should revert if the bid is less than the floor price", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await expect(this.market.connect(this.bidder).placeNewBid(0, 0)).to.be.revertedWith(
+            "Bid price must be above floor price",
+          );
+        });
+
+        it("Should revert if the bid is less than the current bid price plus bid increment", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          // Place first bid first
+          await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(2e18) });
+          await expect(this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(2e18) })).to.be.revertedWith(
+            "New bid price need to greater than minimum price",
+          );
+        });
+
+        it("Should place a new bid with ETH", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(3e18) });
+
+          const auction = await this.market.auctions(0);
+          expect(auction.bidCount).to.equal(1);
+          expect(auction.currentBidOwner).to.equal(this.bidder.address);
+          expect(auction.currentBidPrice).to.equal(BigInt(3e18));
+          expect(await this.market.getProceeds(this.bidder.address, ethers.ZeroAddress)).to.equal(BigInt(3e18));
+        });
+
+        it("Should place a new bid with ERC20", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              this.erc20Token,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await this.erc20Token.connect(this.bidder).approve(await this.market.getAddress(), BigInt(3e18));
+          await this.market.connect(this.bidder).placeNewBid(0, 0);
+
+          const auction = await this.market.auctions(0);
+          expect(auction.bidCount).to.equal(1);
+          expect(auction.currentBidOwner).to.equal(this.bidder.address);
+          expect(auction.currentBidPrice).to.equal(BigInt(3e18));
+          expect(
+            await this.market.getProceeds(await this.bidder.getAddress(), await this.erc20Token.getAddress()),
+          ).to.equal(BigInt(3e18));
+        });
+      });
+
+      describe("Cancel auction", function () {
+        beforeEach(async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+        });
+
+        it("Should revert if auctionId is invalid", async function () {
+          await expect(this.market.connect(this.auctionCreator).cancelAuction(1)).to.be.revertedWith(
+            "Auction not exist",
+          );
+        });
+
+        it("Should revert if user has bid", async function () {
+          await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(1e18) });
+
+          await expect(this.market.connect(this.auctionCreator).cancelAuction(0)).to.be.revertedWith(
+            "User already bidded",
+          );
+        });
+
+        it("Should revert if not the seller", async function () {
+          await expect(this.market.cancelAuction(0)).to.be.rejectedWith("Cancel: should be the owner of the auction");
+        });
+
+        it("Should revert if the auction is already ended", async function () {
+          await ethers.provider.send("evm_increaseTime", [60 * 60]);
+          await ethers.provider.send("evm_mine");
+
+          await expect(this.market.connect(this.auctionCreator).cancelAuction(0)).to.be.revertedWith(
+            "Cancel: already ended",
+          );
+        });
+
+        it("Should emit event when cancel auction", async function () {
+          await expect(this.market.connect(this.auctionCreator).cancelAuction(0))
+            .to.emit(this.market, "AuctionCanceled")
+            .withArgs(this.auctionCreator.address, this.erc721Token.getAddress(), ERC721_AUCTION_TOKEN_ID, 0);
+        });
+      });
     });
   });
 });
