@@ -1,4 +1,4 @@
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { describe } from "mocha";
@@ -77,6 +77,7 @@ describe("Market", function () {
       this.erc1155Token = erc1155Token;
       this.erc20Token = erc20Token;
       this.erc721Token = erc721Token;
+      this.now = await time.latest();
     });
 
     describe("Setup tax fee", async function () {
@@ -376,7 +377,7 @@ describe("Market", function () {
                 await this.erc721Token.getAddress(),
                 ERC721_TOKEN_ID,
                 BigInt(2e18),
-                Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+                this.now + 1 * 60 * 60,
                 BigInt(1e18),
                 BigInt(1e18),
               ),
@@ -396,7 +397,7 @@ describe("Market", function () {
                 await this.erc721Token.getAddress(),
                 ERC721_TOKEN_ID,
                 BigInt(2e18),
-                Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+                this.now + 1 * 60 * 60,
                 BigInt(1e18),
                 BigInt(1e18),
               ),
@@ -412,7 +413,7 @@ describe("Market", function () {
                 await this.erc20Token.getAddress(),
                 ERC721_TOKEN_ID,
                 BigInt(2e18),
-                Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+                this.now + 1 * 60 * 60,
                 BigInt(1e18),
                 BigInt(1e18),
               ),
@@ -428,7 +429,7 @@ describe("Market", function () {
                 await this.erc721Token.getAddress(),
                 ERC721_TOKEN_ID,
                 BigInt(2e18),
-                Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+                this.now + 1 * 60 * 60,
                 BigInt(1e18),
                 BigInt(1e18),
               ),
@@ -447,7 +448,7 @@ describe("Market", function () {
               await this.erc721Token.getAddress(),
               ERC721_AUCTION_TOKEN_ID,
               BigInt(2e18),
-              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              this.now + 1 * 60 * 60,
               0,
               BigInt(1e18),
             );
@@ -458,7 +459,7 @@ describe("Market", function () {
           expect(auction.priceToken).to.equal(ethers.ZeroAddress);
           expect(auction.seller).to.equal(this.auctionCreator.address);
           expect(auction.floorPrice).to.equal(BigInt(2e18));
-          // expect(auction.startTime).to.equal(Math.floor(new Date().getTime() / 1000));
+          // expect(auction.startTime).to.equal(this.now);
           // expect(auction.duration).to.equal(1 * 60 * 60);
           expect(auction.bidCount).to.equal(0);
           expect(auction.currentBidOwner).to.equal(ethers.ZeroAddress);
@@ -476,7 +477,7 @@ describe("Market", function () {
               await this.erc1155Token.getAddress(),
               ERC1155_TOKEN_ID,
               BigInt(2e18),
-              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              this.now + 1 * 60 * 60,
               ERC1155_QUANTITY,
               BigInt(1e18),
             );
@@ -488,7 +489,7 @@ describe("Market", function () {
           expect(auction.seller).to.equal(this.auctionCreator.address);
           expect(auction.floorPrice).to.equal(BigInt(2e18));
           expect(auction.erc1155Quantity).to.equal(ERC1155_QUANTITY);
-          // expect(auction.startTime).to.equal(Math.floor(new Date().getTime() / 1000));
+          // expect(auction.startTime).to.equal(this.now);
           // expect(auction.duration).to.equal(1 * 60 * 60);
           expect(auction.bidCount).to.equal(0);
           expect(auction.currentBidOwner).to.equal(ethers.ZeroAddress);
@@ -497,7 +498,7 @@ describe("Market", function () {
         });
 
         it("Should emit event when create auction", async function () {
-          const endAuction = Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60;
+          const endAuction = this.now + 1 * 60 * 60;
 
           await this.erc721Token
             .connect(this.auctionCreator)
@@ -527,13 +528,15 @@ describe("Market", function () {
             );
         });
 
+        // TODO: Place bid
+
         it("Should revert if auction not exist", async function () {
           await expect(this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(1e18) })).to.be.revertedWith(
             "Auction not exist",
           );
         });
 
-        it("Should revert if the auction is already ended", async function () {
+        it("Should revert place new bid if the auction is already ended", async function () {
           await this.erc721Token
             .connect(this.auctionCreator)
             .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
@@ -545,7 +548,7 @@ describe("Market", function () {
               await this.erc721Token.getAddress(),
               ERC721_AUCTION_TOKEN_ID,
               BigInt(2e18),
-              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              this.now + 1 * 60 * 60,
               0,
               BigInt(1e18),
             );
@@ -553,12 +556,12 @@ describe("Market", function () {
           await ethers.provider.send("evm_increaseTime", [60 * 60]);
           await ethers.provider.send("evm_mine");
 
-          await expect(this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(1e18) })).to.be.revertedWith(
+          await expect(this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(3e18) })).to.be.revertedWith(
             "Auction was ended",
           );
         });
 
-        it("Should revert if the bid is less than the floor price", async function () {
+        it("Should revert if the bid ETH price is less than the floor price", async function () {
           await this.erc721Token
             .connect(this.auctionCreator)
             .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
@@ -570,17 +573,23 @@ describe("Market", function () {
               await this.erc721Token.getAddress(),
               ERC721_AUCTION_TOKEN_ID,
               BigInt(2e18),
-              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              this.now + 1 * 60 * 60,
               0,
               BigInt(1e18),
             );
+
+          console.log(
+            "this.bidder ========",
+            (await this.market.auctions(0)).endAuction,
+            (await this.market.auctions(0)).isEnded,
+          );
 
           await expect(this.market.connect(this.bidder).placeNewBid(0, 0)).to.be.revertedWith(
             "Bid price must be above floor price",
           );
         });
 
-        it("Should revert if the bid is less than the current bid price plus bid increment", async function () {
+        it("Should revert if the bid ETH price is less than the current bid price plus bid increment", async function () {
           await this.erc721Token
             .connect(this.auctionCreator)
             .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
@@ -592,7 +601,7 @@ describe("Market", function () {
               await this.erc721Token.getAddress(),
               ERC721_AUCTION_TOKEN_ID,
               BigInt(2e18),
-              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              this.now + 1 * 60 * 60,
               0,
               BigInt(1e18),
             );
@@ -600,6 +609,55 @@ describe("Market", function () {
           // Place first bid first
           await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(2e18) });
           await expect(this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(2e18) })).to.be.revertedWith(
+            "New bid price need to greater than minimum price",
+          );
+        });
+
+        it("Should revert if the bid ERC20 price is less than the floor price", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              this.erc20Token,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              this.now + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await this.erc20Token.connect(this.bidder).approve(await this.market.getAddress(), BigInt(2e18));
+          await expect(this.market.connect(this.bidder).placeNewBid(0, 0)).to.be.revertedWith(
+            "Bid price must be above floor price",
+          );
+        });
+
+        it("Should revert if the bid ERC20 price is less than the current bid price plus bid increment", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              this.erc20Token,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              this.now + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await this.erc20Token.connect(this.bidder).approve(await this.market.getAddress(), BigInt(2e18));
+
+          // Place first bid first
+          await this.market.connect(this.bidder).placeNewBid(0, BigInt(2e18));
+          await expect(this.market.connect(this.bidder).placeNewBid(0, BigInt(2e18))).to.be.revertedWith(
             "New bid price need to greater than minimum price",
           );
         });
@@ -616,7 +674,7 @@ describe("Market", function () {
               await this.erc721Token.getAddress(),
               ERC721_AUCTION_TOKEN_ID,
               BigInt(2e18),
-              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              this.now + 1 * 60 * 60,
               0,
               BigInt(1e18),
             );
@@ -642,13 +700,13 @@ describe("Market", function () {
               await this.erc721Token.getAddress(),
               ERC721_AUCTION_TOKEN_ID,
               BigInt(2e18),
-              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              this.now + 1 * 60 * 60,
               0,
               BigInt(1e18),
             );
 
           await this.erc20Token.connect(this.bidder).approve(await this.market.getAddress(), BigInt(3e18));
-          await this.market.connect(this.bidder).placeNewBid(0, 0);
+          await this.market.connect(this.bidder).placeNewBid(0, BigInt(3e18));
 
           const auction = await this.market.auctions(0);
           expect(auction.bidCount).to.equal(1);
@@ -673,7 +731,7 @@ describe("Market", function () {
               await this.erc721Token.getAddress(),
               ERC721_AUCTION_TOKEN_ID,
               BigInt(2e18),
-              Math.floor(new Date().getTime() / 1000) + 1 * 60 * 60,
+              this.now + 1 * 60 * 60,
               0,
               BigInt(1e18),
             );
@@ -686,14 +744,14 @@ describe("Market", function () {
         });
 
         it("Should revert if user has bid", async function () {
-          await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(1e18) });
+          await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(3e18) });
 
           await expect(this.market.connect(this.auctionCreator).cancelAuction(0)).to.be.revertedWith(
             "User already bidded",
           );
         });
 
-        it("Should revert if not the seller", async function () {
+        it("Should revert if not the auction creator", async function () {
           await expect(this.market.cancelAuction(0)).to.be.rejectedWith("Cancel: should be the owner of the auction");
         });
 
@@ -702,14 +760,196 @@ describe("Market", function () {
           await ethers.provider.send("evm_mine");
 
           await expect(this.market.connect(this.auctionCreator).cancelAuction(0)).to.be.revertedWith(
-            "Cancel: already ended",
+            "Auction was ended",
           );
         });
 
         it("Should emit event when cancel auction", async function () {
           await expect(this.market.connect(this.auctionCreator).cancelAuction(0))
-            .to.emit(this.market, "AuctionCanceled")
+            .to.emit(this.market, "ItemCanceled")
             .withArgs(this.auctionCreator.address, this.erc721Token.getAddress(), ERC721_AUCTION_TOKEN_ID, 0);
+        });
+      });
+
+      describe("End auction", function () {
+        it("Should revert if auctionId is invalid", async function () {
+          await expect(this.market.connect(this.auctionCreator).endAuction(1)).to.be.revertedWith("Auction not exist");
+        });
+
+        it("Should revert if not the auction creator", async function () {
+          // create auction
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              this.now + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await expect(this.market.endAuction(0)).to.be.rejectedWith("Not creator");
+        });
+
+        it("Should revert if the auction is not ended", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              this.now + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await expect(this.market.connect(this.auctionCreator).endAuction(0)).to.be.revertedWith("Not end yet");
+        });
+
+        it("Should end the auction", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              this.now + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(3e18) });
+
+          await ethers.provider.send("evm_increaseTime", [60 * 60]);
+          await ethers.provider.send("evm_mine");
+
+          await this.market.connect(this.auctionCreator).endAuction(0);
+
+          const auction = await this.market.auctions(0);
+          expect(auction.isEnded).to.be.true;
+        });
+
+        it("Should emit event when end auction", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              this.now + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(3e18) });
+
+          await ethers.provider.send("evm_increaseTime", [60 * 60]);
+          await ethers.provider.send("evm_mine");
+
+          await expect(this.market.connect(this.auctionCreator).endAuction(0)).to.emit(this.market, "AuctionEnded");
+        });
+      });
+
+      describe("Claim nft", function () {
+        it("Should revert if auctionId is invalid", async function () {
+          await expect(this.market.connect(this.bidder).withdrawNft(1)).to.be.revertedWith("Auction not exist");
+        });
+
+        it("Should revert if the auction is not ended", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              this.now + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await expect(this.market.connect(this.bidder).withdrawNft(0)).to.be.revertedWith("Auction in progress");
+        });
+
+        it("Should revert if not the auction winner", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              this.now + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(3e18) });
+
+          await ethers.provider.send("evm_increaseTime", [60 * 60]);
+          await ethers.provider.send("evm_mine");
+
+          await expect(this.market.connect(this.auctionCreator).withdrawNft(0)).to.be.revertedWith(
+            "Not the auction winner",
+          );
+        });
+
+        it("Should claim the ERC721 nft", async function () {
+          await this.erc721Token
+            .connect(this.auctionCreator)
+            .approve(await this.market.getAddress(), ERC721_AUCTION_TOKEN_ID);
+
+          await this.market
+            .connect(this.auctionCreator)
+            .createAuction(
+              ethers.ZeroAddress,
+              await this.erc721Token.getAddress(),
+              ERC721_AUCTION_TOKEN_ID,
+              BigInt(2e18),
+              this.now + 1 * 60 * 60,
+              0,
+              BigInt(1e18),
+            );
+
+          await this.market.connect(this.bidder).placeNewBid(0, 0, { value: BigInt(3e18) });
+
+          await ethers.provider.send("evm_increaseTime", [60 * 60]);
+          await ethers.provider.send("evm_mine");
+
+          await this.market.connect(this.auctionCreator).endAuction(0);
+          await this.market.connect(this.bidder).withdrawNft(0);
+
+          const auction = await this.market.auctions(0);
+          expect(auction.isClaimed).to.be.true;
         });
       });
     });
