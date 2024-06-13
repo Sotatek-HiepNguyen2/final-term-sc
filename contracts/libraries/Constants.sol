@@ -10,10 +10,4 @@ library Constants {
     // bytes4(keccak256('balanceOf(address,uint256)')) ^ bytes4(keccak256('safeTransferFrom(address,address,uint256,uint256,bytes)')) for ERC1155
     bytes4 constant INTERFACE_ID_ERC721 = 0x80ac58cd;
     bytes4 constant INTERFACE_ID_ERC1155 = 0xd9b67a26;
-
-    enum AuctionStatus {
-        Idle,
-        Live,
-        Ended
-    }
 }

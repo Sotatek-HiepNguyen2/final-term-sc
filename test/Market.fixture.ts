@@ -9,12 +9,17 @@ export const ERC721_AUCTION_TOKEN_ID = 2;
 export const ERC721_TOKEN_URI = "https://mytoken.com/1";
 export const ERC1155_TOKEN_ID = 5;
 export const ERC1155_QUANTITY = 100;
+export const AUCTION_FLOOR_PRICE = BigInt(2e18);
+export const AUCTION_BID_INCREMENT = BigInt(1e18);
+export const AUCTION_DURATION = 60 * 60 * 24;
 
 export async function deployMarketFixture() {
   const Market = await ethers.getContractFactory("Marketplace");
   const [owner, treasury, bannedUser, seller, buyer, autionCreator, bidder] = await ethers.getSigners();
 
-  const market = (await upgrades.deployProxy(Market, [treasury.address])) as BaseContract as Marketplace;
+  const market = (await upgrades.deployProxy(Market, [treasury.address], {
+    unsafeAllow: ["external-library-linking"],
+  })) as BaseContract as Marketplace;
   await market.waitForDeployment();
 
   const erc20Contract = await ethers.getContractFactory("ERC20Mock");

@@ -8,18 +8,17 @@ library Errors {
     error InvalidBuyTax(uint256 tax);
 
     error InvalidPrice(uint256 price);
+    error InvalidBidIncrement(uint256 bidIncrement);
     error AuctionNotExists(uint256 auctionId);
+    error NotAuctionCreator(uint256 auctionId);
     error AuctionNotEnded(uint256 auctionId);
     error AuctionAlreadyEnded(uint256 auctionId);
 
-    error InvalidBidIncrement(uint256 bidIncrement);
-
+    error SellerOnly(address sender);
     error SaleNotExists(uint256 saleId);
+    error ItemAlreadySold(uint256 saleId);
     error PriceNotMet(address nftAddress, uint256 tokenId, uint256 price);
-    error NoProceeds();
-    error PriceMustBeAboveZero();
-    error UserAlreadyNotBanned(address user);
-    error UserBanned(address user);
+    error SaleNotEnded(uint256 saleId);
 
     error InvalidQuantity(uint256 quantity);
 }
