@@ -298,7 +298,11 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         emit Events.NewBidPlaced(auctionId, _msgSender(), userPlacedAmount);
     }
 
-    function endAuction(uint256 _auctionId) external existAuction(_auctionId) auctionCreatorOnly(_auctionId) {
+    /**
+     * Seller or highest bidder can withdraw their bid if the auction is ended
+     * @param _auctionId The auction id
+     */
+    function endAuction(uint256 _auctionId) external existAuction(_auctionId) {
         Auction storage auction = auctions[_auctionId];
 
         require(block.timestamp >= auction.endAuction, "EndAuction: Not end yet");

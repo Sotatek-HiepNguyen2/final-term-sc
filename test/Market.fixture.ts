@@ -17,9 +17,7 @@ export async function deployMarketFixture() {
   const Market = await ethers.getContractFactory("Marketplace");
   const [owner, treasury, bannedUser, seller, buyer, autionCreator, bidder] = await ethers.getSigners();
 
-  const market = (await upgrades.deployProxy(Market, [treasury.address], {
-    unsafeAllow: ["external-library-linking"],
-  })) as BaseContract as Marketplace;
+  const market = (await upgrades.deployProxy(Market, [treasury.address])) as BaseContract as Marketplace;
   await market.waitForDeployment();
 
   const erc20Contract = await ethers.getContractFactory("ERC20Mock");
