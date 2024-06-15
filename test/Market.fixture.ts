@@ -12,6 +12,17 @@ export const ERC1155_QUANTITY = 100;
 export const AUCTION_FLOOR_PRICE = BigInt(2e18);
 export const AUCTION_BID_INCREMENT = BigInt(1e18);
 export const AUCTION_DURATION = 60 * 60 * 24;
+export const SELL_PRICE = BigInt(2e18);
+
+export const getActualAmountUserHasToPay = (price: bigint, tax: bigint, base: bigint) => {
+  const taxFee = (price * tax) / base;
+  return price + taxFee;
+};
+
+export const getSellerProceeds = (price: bigint, tax: bigint, base: bigint) => {
+  const taxFee = (price * tax) / base;
+  return price - taxFee;
+};
 
 export async function deployMarketFixture() {
   const Market = await ethers.getContractFactory("Marketplace");

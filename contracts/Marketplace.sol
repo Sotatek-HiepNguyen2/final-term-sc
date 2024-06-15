@@ -2,7 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -15,7 +17,7 @@ import { Errors } from "contracts/libraries/Errors.sol";
 import { Constants } from "contracts/libraries/Constants.sol";
 import { Helpers } from "contracts/libraries/Helpers.sol";
 
-contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
+contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155Receiver, IERC721Receiver {
     using SafeERC20 for IERC20;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -311,38 +313,38 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         // Claim NFT back if no one bid
         if (auction.bidCount == 0) {
             delistNft(_auctionId);
-            emit Events.AuctionEndedWithNoWinner(_auctionId);
-            return;
-        }
-
-        uint256 sellTaxFee = getSellTaxFee(auction.currentBidPrice);
-        uint256 buyTaxFee = getBuyTaxFee(auction.currentBidPrice);
-
-        // Reduce amount winner can claim
-        uint256 sellerProceeds = auction.currentBidPrice - sellTaxFee;
-
-        // Send the sell fee to treasury
-        if (Helpers.isETH(auction.priceToken)) {
-            (bool success, ) = payable(treasury).call{ value: sellTaxFee + buyTaxFee }("");
-            require(success, "EndAuction: Transfer fee failed");
+            auction.isEnded = true;
         } else {
-            IERC20(auction.priceToken).safeTransfer(treasury, sellTaxFee + buyTaxFee);
+            uint256 sellTaxFee = getSellTaxFee(auction.currentBidPrice);
+            uint256 buyTaxFee = getBuyTaxFee(auction.currentBidPrice);
+
+            // Reduce amount winner can claim
+            uint256 sellerProceeds = auction.currentBidPrice - sellTaxFee;
+
+            // Send the sell fee to treasury
+            if (Helpers.isETH(auction.priceToken)) {
+                (bool success, ) = payable(treasury).call{ value: sellTaxFee + buyTaxFee }("");
+                require(success, "EndAuction: Transfer fee failed");
+            } else {
+                IERC20(auction.priceToken).safeTransfer(treasury, sellTaxFee + buyTaxFee);
+            }
+
+            // Transfer the NFT to the winner
+            if (Helpers.isERC721(auction.nftAddress)) {
+                IERC721(auction.nftAddress).safeTransferFrom(address(this), auction.currentBidOwner, auction.tokenId);
+            } else {
+                IERC1155(auction.nftAddress).safeTransferFrom(
+                    address(this),
+                    auction.currentBidOwner,
+                    auction.tokenId,
+                    auction.erc1155Quantity,
+                    "0x0"
+                );
+            }
+
+            pendingWithdrawals[_msgSender()][auction.priceToken] += sellerProceeds;
         }
 
-        // Transfer the NFT to the winner
-        if (Helpers.isERC721(auction.nftAddress)) {
-            IERC721(auction.nftAddress).safeTransferFrom(address(this), auction.currentBidOwner, auction.tokenId);
-        } else {
-            IERC1155(auction.nftAddress).safeTransferFrom(
-                address(this),
-                auction.currentBidOwner,
-                auction.tokenId,
-                auction.erc1155Quantity,
-                "0x0"
-            );
-        }
-
-        pendingWithdrawals[_msgSender()][auction.priceToken] += sellerProceeds;
         auction.isEnded = true;
         emit Events.AuctionEnded(_auctionId, auction.currentBidOwner, auction.currentBidPrice);
     }
@@ -430,7 +432,6 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     function cancelListing(uint256 _saleId) external existSale(_saleId) sellerOnly(_saleId) itemAvailable(_saleId) {
         Listing memory sale = directSales[_saleId];
 
-        // Transfer back the NFT
         if (Helpers.isERC721(sale.nftAddress)) {
             IERC721(sale.nftAddress).safeTransferFrom(address(this), sale.seller, sale.tokenId);
         } else {
@@ -447,6 +448,10 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     // Withdraw =========
+
+    function getTaxBase() external pure returns (uint256) {
+        return Constants.TAX_BASE;
+    }
 
     function getProceeds(address seller, address token) external view returns (uint256) {
         return pendingWithdrawals[seller][token];
@@ -477,5 +482,34 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
     receive() external payable {
         emit Events.ETHReceived(_msgSender(), msg.value);
+    }
+
+    // Implement for ERC721 and ERC1155 Receiver =========
+    function onERC721Received(address, address, uint256, bytes calldata) external pure override returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
+
+    function onERC1155Received(
+        address,
+        address,
+        uint256,
+        uint256,
+        bytes calldata
+    ) external pure override returns (bytes4) {
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(
+        address,
+        address,
+        uint256[] calldata,
+        uint256[] calldata,
+        bytes calldata
+    ) external pure override returns (bytes4) {
+        return this.onERC1155BatchReceived.selector;
+    }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IERC721Receiver).interfaceId || interfaceId == type(IERC1155Receiver).interfaceId;
     }
 }

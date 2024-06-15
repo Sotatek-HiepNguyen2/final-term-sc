@@ -30,7 +30,6 @@ library Events {
     event AuctionCanceled(uint256 auctionId);
     event NewBidPlaced(uint256 auctionId, address bidder, uint256 price);
     event AuctionEnded(uint256 auctionId, address winner, uint256 price);
-    event AuctionEndedWithNoWinner(uint256 auctionId);
 
     event ETHReceived(address sender, uint256 value);
 }
