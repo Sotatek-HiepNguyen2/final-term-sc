@@ -7,29 +7,22 @@ import type { NetworkUserConfig } from "hardhat/types";
 
 dotEnvConfig();
 
-// Run 'npx hardhat vars setup' to see the list of variables that need to be set
-
-const mnemonic: string = process.env.MNEMONIC as string;
-
 const chainIds = {
   bsc: 97,
 };
 
 function getChainConfig(chain: keyof typeof chainIds): NetworkUserConfig {
-  const jsonRpcUrl: string = "https://bsc-dataseed1.binance.org";
+  const jsonRpcUrl: string = process.env.BSC_RPC_URL as string;
 
   return {
-    accounts: {
-      count: 10,
-      mnemonic,
-    },
+    accounts: [process.env.PRIVATE_KEY as string],
     chainId: chainIds[chain],
     url: jsonRpcUrl,
   };
 }
 
 const config: HardhatUserConfig = {
-  defaultNetwork: "hardhat",
+  defaultNetwork: "bsc",
   namedAccounts: {
     deployer: 0,
   },
