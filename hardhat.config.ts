@@ -2,17 +2,28 @@ import "@nomicfoundation/hardhat-toolbox";
 import "@openzeppelin/hardhat-upgrades";
 import { config as dotEnvConfig } from "dotenv";
 import "hardhat-deploy";
+import "hardhat-gas-reporter";
 import type { HardhatUserConfig } from "hardhat/config";
 import type { NetworkUserConfig } from "hardhat/types";
 
 dotEnvConfig();
 
 const chainIds = {
+  hardhat: 31337,
   bsc: 97,
 };
 
 function getChainConfig(chain: keyof typeof chainIds): NetworkUserConfig {
   const jsonRpcUrl: string = process.env.BSC_RPC_URL as string;
+
+  if (chain === "hardhat") {
+    return {
+      chainId: chainIds.hardhat,
+      accounts: {
+        count: 10,
+      },
+    };
+  }
 
   return {
     accounts: [process.env.PRIVATE_KEY as string],
@@ -22,7 +33,7 @@ function getChainConfig(chain: keyof typeof chainIds): NetworkUserConfig {
 }
 
 const config: HardhatUserConfig = {
-  defaultNetwork: "bsc",
+  defaultNetwork: "hardhat",
   namedAccounts: {
     deployer: 0,
   },
