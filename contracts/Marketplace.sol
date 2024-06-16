@@ -33,7 +33,7 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
         __ReentrancyGuard_init();
     }
 
-    // State =========
+    // States ============================================================
 
     uint8 public sellTax;
     uint8 public buyTax;
@@ -41,43 +41,111 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
     mapping(address => bool) public blacklist;
 
     struct Listing {
+        /**
+         * @dev The price of the NFT
+         */
         uint256 price;
+        /**
+         * @dev The quantity of ERC1155 token
+         */
         uint256 erc1155Quantity;
+        /**
+         * @dev The address of the token used for payment
+         */
         address paymentToken;
+        /**
+         * @dev The address of the seller
+         */
         address seller;
+        /**
+         * @dev The address of the NFT
+         */
         address nftAddress;
+        /**
+         * @dev The id of the NFT
+         */
         uint256 tokenId;
+        /**
+         * @dev The status of the sale
+         */
         bool isSold;
     }
 
     struct Auction {
+        /**
+         * @dev The address of the seller
+         */
         address seller;
+        /**
+         * @dev The address of the NFT
+         */
         address nftAddress;
+        /**
+         * @dev The address of the token used for payment
+         */
         address priceToken;
+        /**
+         * @dev The id of the NFT
+         */
         uint256 tokenId;
+        /**
+         * @dev The quantity of ERC1155 token
+         */
         uint256 erc1155Quantity;
+        /**
+         * @dev The floor price of the auction
+         */
         uint256 floorPrice;
+        /**
+         * @dev The start time of the auction
+         */
         uint256 startAuction;
+        /**
+         * @dev The end time of the auction
+         */
         uint256 endAuction;
+        /**
+         * @dev The minimum bid increment between each bid
+         */
         uint256 bidIncrement;
+        /**
+         * @dev The number of bids placed
+         */
         uint256 bidCount;
+        /**
+         * @dev The current highest bid price
+         */
         uint256 currentBidPrice;
+        /**
+         * @dev The address of the highest bidder
+         */
         address payable currentBidOwner;
+        /**
+         * @dev The status of the auction
+         */
         bool isEnded;
     }
 
     /**
-     * @dev Mapping of auctionId to the highest bid placed
-     * Because bidder can only withdraw their bid if they are not the highest bidder and the auction is ended
+     * @dev The auction id to auction details mapping
      */
     mapping(uint256 => Auction) public auctions;
+    /**
+     * @dev The bid id to bid details mapping
+     */
     mapping(uint256 => mapping(address => uint256)) bids;
+    /**
+     * @dev The sale id to sale details mapping
+     */
     mapping(uint256 => Listing) public directSales;
     uint256 auctionId;
     uint256 listingId;
+    /**
+     * @dev The user to token to withdrawal amount mapping
+     */
     mapping(address => mapping(address => uint256)) private pendingWithdrawals;
 
-    // Modifiers =========
+    // Modifiers ============================================================
 
     modifier whiteListOnly() {
         if (blacklist[_msgSender()] == true) {
@@ -144,16 +212,25 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
         _;
     }
 
-    // Internal =========
+    // Internal functions ============================================================
 
+    /**
+     * @dev Calculate the new bid price from the user placed amount
+     */
     function getNewBidPriceFromUserPlaced(uint256 _userPlacedAmount) internal view returns (uint256) {
         return (_userPlacedAmount * Constants.TAX_BASE) / (Constants.TAX_BASE + buyTax);
     }
 
+    /**
+     * @dev Calculate the tax fee for the seller
+     */
     function getSellTaxFee(uint256 _price) internal view returns (uint256) {
         return (_price * sellTax) / Constants.TAX_BASE;
     }
 
+    /**
+     * @dev Calculate the tax fee for the buyer
+     */
     function getBuyTaxFee(uint256 _price) internal view returns (uint256) {
         return (_price * buyTax) / Constants.TAX_BASE;
     }
@@ -179,6 +256,8 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
                 "0x0"
             );
     }
+
+    // External functions ============================================================
 
     // Tax =========
 
@@ -210,6 +289,17 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
 
     // Auction =========
 
+    /**
+     * Create a new auction
+     * @param _priceToken The address of the token used for payment
+     * @param _nftAddress The address of the NFT
+     * @param _tokenId The id of the NFT
+     * @param _floorPrice The floor price of the auction
+     * @param _startAuction The start time of the auction
+     * @param _endAuction The end time of the auction
+     * @param _erc1155Quantity The quantity of ERC1155 token
+     * @param _bidIncrement The minimum bid increment between each bid
+     */
     function createAuction(
         address _priceToken,
         address _nftAddress,
@@ -259,6 +349,11 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
         );
     }
 
+    /**
+     * Place a new bid for the auction
+     * @param _auctionId The auction id
+     * @param _newBidPrice The amount user send to place a bid
+     */
     function placeNewBid(
         uint256 _auctionId,
         uint256 _newBidPrice
@@ -349,6 +444,10 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
         emit Events.AuctionEnded(_auctionId, auction.currentBidOwner, auction.currentBidPrice);
     }
 
+    /**
+     * Seller can cancel the auction if no one bid and the auction is not started
+     * @param _auctionId The auction id
+     */
     function cancelAuction(uint256 _auctionId) external existAuction(_auctionId) auctionCreatorOnly(_auctionId) {
         Auction memory auction = auctions[_auctionId];
 
@@ -361,6 +460,14 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
 
     // Direct sale =========
 
+    /**
+     * List an item for sale
+     * @param _paymentToken The address of the token used for payment
+     * @param _nftAddress The address of the NFT
+     * @param _tokenId The id of the NFT
+     * @param _erc1155Quantity The quantity of ERC1155 token, set to 0 if ERC721
+     * @param _price The price of the NFT
+     */
     function listForSale(
         address _paymentToken,
         address _nftAddress,
@@ -390,6 +497,10 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
         emit Events.ItemListed(_msgSender(), _nftAddress, _tokenId, _erc1155Quantity, _price, _paymentToken);
     }
 
+    /**
+     * Buy an item from the sale
+     * @param _saleId The sale id
+     */
     function buyItem(
         uint256 _saleId
     ) external payable whiteListOnly nonReentrant existSale(_saleId) itemAvailable(_saleId) {
@@ -429,6 +540,10 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
         emit Events.ItemBought(_saleId, _msgSender());
     }
 
+    /**
+     * Cancel the sale if the item is not sold
+     * @param _saleId The sale id
+     */
     function cancelListing(uint256 _saleId) external existSale(_saleId) sellerOnly(_saleId) itemAvailable(_saleId) {
         Listing memory sale = directSales[_saleId];
 
@@ -449,14 +564,27 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
 
     // Withdraw =========
 
+    /**
+     * Get the tax base, which is 10000 by default
+     */
     function getTaxBase() external pure returns (uint256) {
         return Constants.TAX_BASE;
     }
 
+    /**
+     * Get the proceeds of the seller
+     * @param seller The address of the seller
+     * @param token The address of the token
+     */
     function getProceeds(address seller, address token) external view returns (uint256) {
         return pendingWithdrawals[seller][token];
     }
 
+    /**
+     * Withdraw the proceeds from the sale or auction
+     * Bidder can withdraw their bid if the auction is ended and they are not the winner
+     * @param tokens The array of token addresses
+     */
     function withdraw(address[] memory tokens) external nonReentrant {
         for (uint256 i = 0; i < tokens.length; i++) {
             address withdrawalToken = tokens[i];
@@ -480,11 +608,14 @@ contract Marketplace is OwnableUpgradeable, ReentrancyGuardUpgradeable, IERC1155
 
     // ETH Receiver =========
 
+    /**
+     * Receive ETH
+     */
     receive() external payable {
         emit Events.ETHReceived(_msgSender(), msg.value);
     }
 
-    // Implement for ERC721 and ERC1155 Receiver =========
+    // Implement for ERC721 and ERC1155 Receiver contract =========
     function onERC721Received(address, address, uint256, bytes calldata) external pure override returns (bytes4) {
         return this.onERC721Received.selector;
     }
